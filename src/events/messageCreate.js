@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { Events } from 'discord.js';
 import { logger } from '../utils/logger.js';
 import { getLevelingConfig, getUserLevelData } from '../services/leveling/leveling.js';
@@ -22,12 +23,200 @@ import {
 const MESSAGE_XP_RATE_LIMIT_ATTEMPTS = 12;
 const MESSAGE_XP_RATE_LIMIT_WINDOW_MS = 10000;
 
+const BLOCK_TERMS_URL = new URL(
+  '../config/moderation/blockTerms.json',
+  import.meta.url
+);
+
+const MOD_LOG_CHANNEL_ID = '1555567834007085087';
+const WARNING_FALLBACK_CHANNEL_ID = '1554283976305147984';
+
+async function loadBlockTerms() {
+  try {
+    return JSON.parse(await readFile(BLOCK_TERMS_URL, 'utf8'));
+  } catch (error) {
+    logger.error('Failed to read blockTerms.json:', error);
+    return null;
+  }
+}
+
+function escapeRegex(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+function findMatchingTerm(content, terms = []) {
+  if (!Array.isArray(terms)) return null;
+
+  for (const term of terms) {
+    if (typeof term !== 'string' || !term.trim()) continue;
+
+    const pattern = new RegExp(escapeRegex(term.trim()), 'iu');
+
+    if (pattern.test(content)) {
+      return term;
+    }
+  }
+
+  return null;
+}
+
+async function sendModerationLog(client, message, action, term, details) {
+  try {
+    const channel = await client.channels.fetch(MOD_LOG_CHANNEL_ID);
+    if (!channel?.isTextBased() || !channel.guild) {
+      logger.warn('Moderation log channel is unavailable.');
+      return;
+    }
+
+    await channel.send({
+      allowedMentions: { parse: [] },
+      embeds: [{
+        title: `Humanscord AutoMod — ${action}`,
+        color: action === 'Permanent Ban' ? 0xE74C3C : 0x3498DB,
+        fields: [
+          {
+            name: 'Member',
+            value: `${message.author.tag}\nID: ${message.author.id}`
+          },
+          {
+            name: 'Matched term',
+            value: `||${String(term).slice(0, 200)}||`
+          },
+          {
+            name: 'Original message',
+            value: message.url
+          },
+          ...(details ? [{ name: 'Details', value: details }] : [])
+        ],
+        timestamp: new Date().toISOString()
+      }]
+    });
+  } catch (error) {
+    logger.error('Could not send moderation log:', error);
+  }
+}
+
+async function handleBlockTerms(message, client) {
+  const config = await loadBlockTerms();
+  if (!config) return false;
+
+  // Do not apply these custom rules to server administrators.
+  if (message.member?.permissions.has('Administrator')) return false;
+
+  const content = message.content;
+
+  // PRIORITY 1: BAN WORDS AND PHRASES.
+  const banTerm =
+    findMatchingTerm(content, config.permBanWords) ??
+    findMatchingTerm(content, config.permBanPhrases);
+
+  if (banTerm) {
+    await message.delete().catch(error => {
+      logger.warn('Could not delete ban-triggering message:', error);
+    });
+
+    try {
+      await message.guild.members.ban(message.author.id, {
+        reason: `Humanscord AutoMod matched permanent-ban term: ${banTerm}`
+      });
+
+      await sendModerationLog(
+        client, message, 'Permanent Ban', banTerm, 'Ban succeeded.'
+      );
+    } catch (error) {
+      logger.error('Permanent ban failed:', error);
+
+      await sendModerationLog(
+        client,
+        message,
+        'Ban Failed',
+        banTerm,
+        'Ban failed. Check the bot permission and role hierarchy.'
+      );
+    }
+
+    return true;
+  }
+
+  // PRIORITY 2: WARNING WORDS AND PHRASES.
+  const warningTerm =
+    findMatchingTerm(content, config.warningWords) ??
+    findMatchingTerm(content, config.warningPhrases);
+
+  if (warningTerm) {
+    await message.delete().catch(error => {
+      logger.warn('Could not delete warning-triggering message:', error);
+    });
+
+    let details = 'Warning DM sent.';
+
+    try {
+      await message.author.send(
+        `⚠️ Warning from ${message.guild.name}\n\n` +
+        'Your message was removed because it matched a moderation rule. ' +
+        'Please follow the server rules.'
+      );
+    } catch {
+      try {
+        const fallback = await client.channels.fetch(
+          WARNING_FALLBACK_CHANNEL_ID
+        );
+
+        if (!fallback?.isTextBased() || !fallback.guild) {
+          throw new Error('Warning fallback channel is unavailable.');
+        }
+
+        await fallback.send({
+          content:
+            `<@${message.author.id}> ⚠️ Your message was removed ` +
+            'because it matched a moderation rule. Please follow the server rules.',
+          allowedMentions: {
+            parse: [],
+            users: [message.author.id]
+          }
+        });
+
+        details = 'DM unavailable; warning posted in bot-commands.';
+      } catch (error) {
+        details = 'DM and fallback warning failed. Check channel permissions.';
+        logger.error('Could not send fallback warning:', error);
+      }
+    }
+
+    await sendModerationLog(
+      client, message, 'Warning', warningTerm, details
+    );
+
+    return true;
+  }
+
+  // PRIORITY 3: ORDINARY BLOCKED WORDS AND PHRASES.
+  const blockedTerm =
+    findMatchingTerm(content, config.words) ??
+    findMatchingTerm(content, config.phrases);
+
+  if (blockedTerm) {
+    await message.delete().catch(error => {
+      logger.warn('Could not delete blocked message:', error);
+    });
+
+    await sendModerationLog(
+      client, message, 'Message Deleted', blockedTerm, 'Message blocked.'
+    );
+
+    return true;
+  }
+
+  return false;
+}
 export default {
   name: Events.MessageCreate,
   async execute(message, client) {
     try {
       if (message.author.bot || !message.guild) return;
-
+      
+      const moderationProcessed = await handleBlockTerms(message, client);
+      if (moderationProcessed) return;
+  
       logger.debug(`Message received from ${message.author.tag}: ${message.content}`);
 
       const countingProcessed = await handleCountingGame(message, client);
