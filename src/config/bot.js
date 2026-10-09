@@ -457,9 +457,9 @@ export const botConfig = {
 
     // Community engagement systems.
     tickets: false,
-    giveaways: true,
+    giveaways: false,
     birthday: false,
-    counter: true,
+    counter: false,
 
     // Security and self-service systems.
     verification: false,
@@ -467,11 +467,11 @@ export const botConfig = {
     joinToCreate: false,
 
     // Utility/quality-of-life modules.
-    voice: true,
+    voice: false,
     search: false,
     tools: true,
     utility: false,
-    community: true,
+    community: false,
     fun: true,
     music: false,
   },
