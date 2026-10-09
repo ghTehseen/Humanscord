@@ -456,21 +456,21 @@ export const botConfig = {
     welcome: true,
 
     // Community engagement systems.
-    tickets: true,
+    tickets: false,
     giveaways: true,
     birthday: true,
     counter: true,
 
     // Security and self-service systems.
-    verification: true,
+    verification: false,
     reactionRoles: true,
     joinToCreate: true,
 
     // Utility/quality-of-life modules.
     voice: true,
-    search: true,
+    search: false,
     tools: true,
-    utility: true,
+    utility: false,
     community: true,
     fun: true,
     music: false,
