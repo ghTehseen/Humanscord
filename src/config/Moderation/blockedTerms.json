@@ -1,5 +1,18 @@
+
 {
-  "_comment": "Starter AutoMod lists for Humanscord. Add server-specific terms with /automod word add and /automod phrase add. Keys starting with _ are ignored.",
+  "_comment": "Humanscord AutoMod rules. Ban takes priority over warning, then ordinary deletion.",
+  "permBanWords": [
+    "your_ban_word"
+  ],
+  "permBanPhrases": [
+    "your ban phrase"
+  ],
+  "warningWords": [
+    "your_warning_word"
+  ],
+  "warningPhrases": [
+    "your warning phrase"
+  ],
   "words": [
     "nigger",
     "nigga",
@@ -22,9 +35,6 @@
     "you won nitro",
     "airdrop nitro",
     "dm me for nitro",
-    "check my bio for nitro",
-    "child porn",
-    "underage porn",
-    "loli porn"
+    "check my bio for nitro"
   ]
 }
